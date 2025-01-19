@@ -14,3 +14,5 @@ jobs:
   main:
     uses: ahmadnassri/actions/.github/workflows/push-shell.yml@master
     secrets: inherit
+    permissions:
+      contents: read
