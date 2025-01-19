@@ -1,0 +1,8 @@
+version: 2.0
+
+id: template-shell
+
+about:
+  title: Template for shell script repos
+  description: A template for shell script repositories
+  repository: ahmadnassri/template-shell
