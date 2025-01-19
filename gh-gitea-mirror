@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+set -e
+
+# check if jq is installed
+hash jq 2> /dev/null || { echo >&2 "jq cli not found. https://stedolan.github.io/jq/" && exit 1; }
+
+# check if gh cli is installed
+hash gh 2> /dev/null || { echo >&2 "gh cli not found. https://cli.github.com" && exit 1; }
+
+# check if curl is installed
+hash curl 2> /dev/null || { echo >&2 "curl cli not found. https://curl.haxx.se/" && exit 1; }
+
+
+function usage () {
+
+  if [ -n "$1" ]; then
+    echo "Error: $1"
+    echo ""
+  fi
+
+  cat << EOF  
+Usage: gh gitea-mirror [options]
+setup a mirror for all github repository of <user> or <org>
+
+Options: 
+  --user              GitHub username (optional)
+  --org               GitHub organization (optional)
+  --gitea-url         Gitea instance base URL
+  --gitea-token       Gitea token (write:organization, write:repository)
+  --github-token      GitHub token (read:repo or contents:read)
+  --overwrite         Overwrite existing repositories (useful to replace expired tokens)
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+  --mine)         mine=true;          shift 1 ;;
+  --user)         user="$2";          shift 2 ;;
+  --org)          org="$2";           shift 2 ;;
+  --gitea-url)    gitea_url="$2";     shift 2 ;;
+  --gitea-token)  gitea_token="$2";   shift 2 ;;
+  --github-token) github_token="$2";  shift 2 ;;
+  --overwrite)    overwrite=true;     shift 1 ;;
+  --help)         usage;              exit 0  ;;
+  esac
+done
+
+if [ -z "$user" ] && [ -z "$org" ]; then
+  path="user/repos?affiliation=owner"
+else
+  if [ -z "$user" ]; then
+    path="orgs/${org}/repos"
+  else
+    path="users/${user}/repos"
+  fi
+fi
+
+if [ -z "$gitea_url" ]; then
+  usage "must provide a gitea url"
+  exit 1
+fi
+
+if [ -z "$gitea_token" ]; then
+  usage "must provide a gitea token"
+
+  exit
+fi
+
+if [ -z "$github_token" ]; then
+  usage "must provide a github token"
+  exit 1
+fi
+
+gh api ${path} --paginate -q '.[] | .owner.login, .name, .private, .clone_url' | while read -r owner; read -r repo_name; read -r private; read -r clone_addr; do
+  # check if repo exists
+  exist_check=$(curl \
+      --silent \
+      --request GET \
+      --header "Authorization: token $gitea_token" \
+      --write-out "%{http_code}\n"  \
+      --output /dev/null \
+      $gitea_url/api/v1/repos/${owner}/${repo_name})
+
+  # delete if exists
+  if [ $exist_check == "200" ] && [ "$overwrite" == "true" ]; then
+    curl \
+      --silent \
+      --request DELETE \
+      --header "Authorization: token $gitea_token" \
+      $gitea_url/api/v1/repos/${owner}/${repo_name}
+  fi
+
+  # prepare body
+  jq \
+    -c -n \
+    --arg repo_owner "${owner}" \
+    --arg repo_name "${repo_name}" \
+    --arg auth_token "${github_token}" \
+    --arg clone_addr "${clone_addr}" \
+    '{ $repo_owner, $repo_name, $auth_token, $clone_addr }' \
+  | \
+  # create repo
+  curl \
+    --silent \
+    --json @- \
+    --request POST \
+    --header "Authorization: token $gitea_token" \
+    --write-out "%{http_code}\n"  \
+    $gitea_url/api/v1/repos/migrate | { 
+      read -r body
+      read -r code
+
+      error=$(echo $body | jq -r '.message')
+
+      case $code in
+          201)
+            if [ "$exist_check" == 200 ]; then
+              echo -e "♻️  ${owner}/${repo_name} [overwriten]"
+            else
+              echo -e "✅ ${owner}/${repo_name} [success]"
+            fi
+          ;;
+          409) echo -e "⚠️  ${owner}/${repo_name} [exists]" ;;
+            *) echo -e "❌ ${owner}/${repo_name} [fail]: ${error}" ;;
+      esac
+    }
+done
