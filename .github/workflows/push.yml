@@ -1,6 +1,6 @@
-# ----------------------------------------------- #
-# Note: this file originates in template-template #
-# ----------------------------------------------- #
+# -------------------------------------------- #
+# Note: this file originates in template-shell #
+# -------------------------------------------- #
 
 name: push
 
@@ -12,9 +12,5 @@ permissions: read-all
 
 jobs:
   main:
-    uses: ahmadnassri/actions/.github/workflows/push-template.yml@master
+    uses: ahmadnassri/actions/.github/workflows/push-shell.yml@master
     secrets: inherit
-    permissions:
-      contents: write
-      statuses: write
-      pull-requests: write
